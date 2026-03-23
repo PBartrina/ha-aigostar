@@ -1,0 +1,35 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Aggiungi lampadine Aigostar",
+        "description": "Inserisci le credenziali del tuo account AigoSmart.\n\nTutte le lampadine collegate verranno scoperte automaticamente.\nIl refresh del token viene gestito in automatico.",
+        "data": {
+          "email":    "Email (account AigoSmart)",
+          "password": "Password"
+        }
+      },
+      "verify": {
+        "title": "Verifica email",
+        "description": "Un codice di verifica è stato inviato alla tua email.\nInserisci il codice qui sotto.",
+        "data": {
+          "security_code": "Codice di verifica"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Login fallito. Controlla email e password.",
+      "invalid_code":   "Codice di verifica non valido. Riprova.",
+      "unknown":        "Errore imprevisto. Controlla i log di Home Assistant."
+    },
+    "abort": {
+      "already_configured": "L'account Aigostar è già configurato."
+    }
+  },
+  "services": {
+    "sync_devices": {
+      "name": "Sincronizza dispositivi",
+      "description": "Riscopri tutti i dispositivi dal cloud Aigostar e aggiungi quelli nuovi."
+    }
+  }
+}

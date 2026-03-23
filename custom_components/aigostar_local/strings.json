@@ -1,0 +1,35 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Add Aigostar bulbs",
+        "description": "Enter your AigoSmart account credentials.\n\nAll connected bulbs will be discovered automatically.",
+        "data": {
+          "email": "Email (AigoSmart account)",
+          "password": "Password"
+        }
+      },
+      "verify": {
+        "title": "Email verification",
+        "description": "A verification code has been sent to your email.\nPlease enter the code below.",
+        "data": {
+          "security_code": "Verification code"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Login failed. Check email and password.",
+      "invalid_code": "Invalid verification code. Try again.",
+      "unknown": "Unexpected error. Check Home Assistant logs."
+    },
+    "abort": {
+      "already_configured": "Aigostar account is already configured."
+    }
+  },
+  "services": {
+    "sync_devices": {
+      "name": "Sync devices",
+      "description": "Re-discover all devices from the Aigostar cloud and add new ones."
+    }
+  }
+}

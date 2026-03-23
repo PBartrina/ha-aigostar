@@ -1,0 +1,12 @@
+{
+  "domain": "aigostar_local",
+  "name": "Aigostar Smart Lights",
+  "version": "1.0.0",
+  "documentation": "https://github.com/MarcoM1993/ha-aigostar",
+  "issue_tracker": "https://github.com/MarcoM1993/ha-aigostar/issues",
+  "requirements": ["cryptography>=41.0.0"],
+  "dependencies": [],
+  "codeowners": ["@MarcoM1993"],
+  "iot_class": "cloud_polling",
+  "config_flow": true
+}
