@@ -44,6 +44,7 @@ The integration communicates via the Alibaba Cloud IoT API Gateway using x-ca-si
 custom_components/aigostar_local/
 ├── __init__.py      — Entry setup, token refresh, device sync, service registration
 ├── alibaba_api.py   — Full API client: login flow, device list, property get/set
+├── brand/           — Integration icons for HA 2026.3+ (icon.png, icon@2x.png)
 ├── config_flow.py   — HA config flow: email/password → optional verification code
 ├── const.py         — Constants: API keys, TSL property names, conversion ranges
 ├── light.py         — LightEntity: polling, brightness/color_temp control
@@ -67,6 +68,27 @@ custom_components/aigostar_local/
 - `main` — stable releases only (tagged `vX.Y.Z`)
 - `beta` — pre-releases for testing (tagged `vX.Y.Z-beta.N`)
 - `dev` — active development
+
+### Release Process (automated via CI)
+
+Releases are fully automated by `.github/workflows/release.yml`. **Do NOT manually create tags, bump versions, or create GitHub releases.**
+
+How it works:
+1. Push/merge commits to `main` (use conventional commit messages: `feat:`, `fix:`, etc.)
+2. The CI workflow automatically:
+   - Analyzes commit messages since the last tag to determine the version bump (patch/minor/major)
+   - Bumps the version in `manifest.json`
+   - Creates a `chore(release): vX.Y.Z` commit + tag
+   - Creates a GitHub Release with auto-generated changelog
+   - Merges main back into `dev`
+3. Commits starting with `chore(release):` are skipped by the CI to avoid infinite loops
+
+Version bump rules (conventional commits):
+- `fix:` → patch bump (e.g. 1.2.1 → 1.2.2)
+- `feat:` → minor bump (e.g. 1.2.1 → 1.3.0)
+- `feat!:` or `BREAKING CHANGE` → major bump (e.g. 1.2.1 → 2.0.0)
+
+**Important**: When merging to main, ensure the last commit message is NOT `chore(release):` — otherwise the CI will skip the release.
 
 ### Deploy to Home Assistant (dev/test)
 ```bash
