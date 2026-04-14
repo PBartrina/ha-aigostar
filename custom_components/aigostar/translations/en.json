@@ -2,15 +2,31 @@
   "config": {
     "step": {
       "user": {
-        "title": "Add Aigostar Bulbs",
-        "description": "Enter your AigoSmart account credentials.\n\nAll bulbs linked to your account will be discovered automatically.\nToken refresh is handled automatically.",
+        "title": "Add Aigostar bulbs",
+        "menu_options": {
+          "login": "Email + password (standard login)",
+          "token_bypass": "Use pre-obtained tokens (bypass mode)"
+        }
+      },
+      "login": {
+        "title": "Login with AigoSmart account",
+        "description": "Enter your AigoSmart account credentials.",
         "data": {
-          "email":    "Email (AigoSmart account)",
+          "email": "Email (AigoSmart account)",
           "password": "Password"
         }
       },
+      "token_bypass": {
+        "title": "Token bypass (recommended)",
+        "description": "Enter the tokens obtained from bypass_aigostar.py.\niotToken expires every 20h but is auto-refreshed by HA.\nrefreshToken lasts ~8 days.",
+        "data": {
+          "iot_token": "iotToken",
+          "refresh_token": "refreshToken",
+          "identity_id": "identityId"
+        }
+      },
       "verify": {
-        "title": "Email Verification",
+        "title": "Email verification",
         "description": "A verification code has been sent to your email.\nPlease enter the code below.",
         "data": {
           "security_code": "Verification code"
@@ -18,9 +34,9 @@
       }
     },
     "error": {
-      "cannot_connect": "Login failed. Check email and password.",
-      "invalid_code":   "Invalid verification code. Try again.",
-      "unknown":        "Unexpected error. Check Home Assistant logs."
+      "cannot_connect": "Token invalid or expired. Run bypass_aigostar.py to get fresh tokens.",
+      "invalid_code": "Invalid verification code. Try again.",
+      "unknown": "Unexpected error. Check Home Assistant logs."
     },
     "abort": {
       "already_configured": "Aigostar account is already configured."

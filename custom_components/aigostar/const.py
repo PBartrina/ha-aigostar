@@ -16,6 +16,11 @@ APP_SECRET = "41fd4a1eb18fa7ace5e2abbbe3867f93"
 CONF_EMAIL       = "email"
 CONF_PASSWORD    = "password"
 
+# Pre-obtained token keys (set by bypass_aigostar.py --inject-ha, skip UC OAuth)
+CONF_IOT_TOKEN     = "iot_token"
+CONF_REFRESH_TOKEN = "refresh_token"
+CONF_IDENTITY_ID   = "identity_id"
+
 # TSL properties for Aigostar TG7100C (captured via /thing/tsl/get)
 PROP_SWITCH     = "LightSwitch"       # bool  0=off 1=on
 PROP_BRIGHTNESS = "Brightness"        # int   1-100 (percentage)

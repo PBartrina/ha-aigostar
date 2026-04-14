@@ -8,6 +8,10 @@ Login flow (reverse-engineered from the AigoSmart Android APK):
   3. POST api.link.aliyun.com/living/account/region/get -> oaApiGatewayEndpoint
   4. POST {oaHost}/api/prd/loginbyoauth.json        -> sid (OA session)
   5. POST api-iot/account/createSessionByAuthCode    -> iotToken + refreshToken
+
+Token refresh (avoids re-login):
+  POST api-iot/account/checkOrRefreshSession -> new iotToken
+  (uses refreshToken valid for ~8 days; captured via bypass_aigostar.py)
 """
 from __future__ import annotations
 
@@ -64,16 +68,10 @@ UC_TENANT_ID = "1000"
 # =====================================================================
 
 def _uc_md5(text: str) -> str:
-    """MD5 hex uppercase, matching SignatureUtil.md5() from the APK."""
     return hashlib.md5(text.encode("utf-8")).hexdigest().upper()
 
 
 def _uc_sign_request(method: str, url: str, timestamp: str) -> str:
-    """
-    Compute the Signature header as the Android interceptor does.
-    SignKey = AppKey + mAppsecret + timestamp + METHOD + url [+ sortedParams]
-    Signature = MD5(SignKey).toUpperCase()
-    """
     sorted_params = ""
     base_url = url
     if "?" in url:
@@ -85,7 +83,6 @@ def _uc_sign_request(method: str, url: str, timestamp: str) -> str:
                 pairs[k] = v
         sorted_entries = sorted(pairs.items(), key=lambda x: x[0])
         sorted_params = ",".join(f"{k}{v}" for k, v in sorted_entries)
-
     sign_key = UC_APP_KEY + AES_KEY + timestamp + method.upper() + base_url
     if sorted_params:
         sign_key += sorted_params
@@ -93,7 +90,6 @@ def _uc_sign_request(method: str, url: str, timestamp: str) -> str:
 
 
 def _uc_headers(method: str, url: str) -> dict[str, str]:
-    """Generate AppKey/Timestamp/TenantId/Signature headers for UC API."""
     ts = str(int(time.time() * 1000))
     return {
         "AppKey": UC_APP_KEY,
@@ -108,10 +104,8 @@ def _uc_headers(method: str, url: str) -> dict[str, str]:
 # =====================================================================
 
 def encrypt_password(password: str) -> str:
-    """Encrypt password using AES-256-CBC with zero IV (matches AigoSmart app)."""
     from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
     from cryptography.hazmat.primitives import padding as sym_padding
-
     key = AES_KEY.encode("utf-8")
     iv = b"\x00" * 16
     padder = sym_padding.PKCS7(128).padder()
@@ -130,17 +124,14 @@ SMART_API_BASE = "https://smartapi.aigostar.com"
 PATH_SEND_CODE = "/message/v1.1/security/sendcode/anonymous"
 PATH_VERIFY_CODE = "/message/v1.1/security/verify/anonymous"
 
-# Deterministic device ID (persists across restarts to avoid repeated security codes)
 _DEVICE_ID = str(uuid.uuid5(uuid.NAMESPACE_DNS, "aigostar.homeassistant")).replace("-", "")
 
 
 def _smart_api_post(path: str, body: dict) -> dict:
-    """POST JSON to smartapi.aigostar.com with signature headers."""
     url = SMART_API_BASE + path
     body_bytes = json.dumps(body, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
     headers = {"Content-Type": "application/json; charset=UTF-8"}
     headers.update(_uc_headers("POST", url))
-
     req = urllib.request.Request(url, data=body_bytes, headers=headers, method="POST")
     try:
         with urllib.request.urlopen(req, timeout=15) as resp:
@@ -160,7 +151,6 @@ def _smart_api_post(path: str, body: dict) -> dict:
 
 
 def send_verification_code_sync(email: str) -> dict:
-    """Send a verification code to the given email for LoginSecurity."""
     account_type = "email" if "@" in email else "phone_number"
     username = email.strip() if "@" in email else email
     body = {
@@ -176,7 +166,6 @@ def send_verification_code_sync(email: str) -> dict:
 
 
 def check_security_verify_sync(email: str, code: str) -> dict:
-    """Verify the code entered by the user."""
     account_type = "email" if "@" in email else "phone_number"
     username = email.strip() if "@" in email else email
     body = {
@@ -195,17 +184,13 @@ def check_security_verify_sync(email: str, code: str) -> dict:
 # =====================================================================
 
 class NeedSecurityCodeError(Exception):
-    """Raised when the server requires an email verification code."""
     pass
 
 
 def _uc_login_sync(email: str, password: str, security_code: str = "") -> dict:
-    """POST v1.0/connect/token -> {access_token, refresh_token, user_id}."""
     encrypted_pw = encrypt_password(password)
-
     account_type = "email" if "@" in email else "phone_number"
     username = email.strip() if "@" in email else email
-
     form_params = {
         "account_type": account_type,
         "username": username,
@@ -217,19 +202,11 @@ def _uc_login_sync(email: str, password: str, security_code: str = "") -> dict:
     }
     if security_code:
         form_params["security_code"] = security_code
-
     form_data = urllib.parse.urlencode(form_params).encode("utf-8")
-
     login_url = UC_BASE + UC_LOGIN
     headers = {"Content-Type": "application/x-www-form-urlencoded"}
     headers.update(_uc_headers("POST", login_url))
-
-    req = urllib.request.Request(
-        login_url,
-        data=form_data,
-        headers=headers,
-        method="POST",
-    )
+    req = urllib.request.Request(login_url, data=form_data, headers=headers, method="POST")
     try:
         with urllib.request.urlopen(req, timeout=15) as resp:
             result = json.loads(resp.read())
@@ -244,7 +221,6 @@ def _uc_login_sync(email: str, password: str, security_code: str = "") -> dict:
             raise NeedSecurityCodeError(err.get("message", "Security code required"))
         msg = err.get("error_description", err.get("message", err.get("error", str(raw[:300]))))
         raise ValueError(f"Login failed: {msg}") from exc
-
     if "access_token" not in result:
         raise ValueError(f"Login failed: no access_token in response: {result}")
     return result
@@ -255,7 +231,6 @@ def _uc_login_sync(email: str, password: str, security_code: str = "") -> dict:
 # =====================================================================
 
 def _uc_authorize_sync(access_token: str) -> str:
-    """GET v1.0/connect/authorize -> authorization code."""
     params = urllib.parse.urlencode({
         "response_type": "code",
         "client_id": SMARTAPP_ID,
@@ -266,19 +241,13 @@ def _uc_authorize_sync(access_token: str) -> str:
     authorize_url = UC_BASE + UC_AUTHORIZE + "?" + params
     headers = {"Authorization": f"Bearer {access_token}"}
     headers.update(_uc_headers("GET", authorize_url))
-
-    req = urllib.request.Request(
-        authorize_url,
-        headers=headers,
-        method="GET",
-    )
+    req = urllib.request.Request(authorize_url, headers=headers, method="GET")
     try:
         with urllib.request.urlopen(req, timeout=15) as resp:
             result = json.loads(resp.read())
     except urllib.error.HTTPError as exc:
         raw = exc.read()
         raise ValueError(f"Authorize failed: HTTP {exc.code}: {raw[:300]}") from exc
-
     code = result.get("code", "")
     if not code:
         raise ValueError(f"Authorize failed: no code in response: {result}")
@@ -286,7 +255,7 @@ def _uc_authorize_sync(access_token: str) -> str:
 
 
 # =====================================================================
-#  x-ca-signature helpers (shared by IoT API calls)
+#  x-ca-signature helpers
 # =====================================================================
 
 def _content_md5(body_bytes: bytes) -> str:
@@ -378,7 +347,6 @@ def _call_sync(
 # =====================================================================
 
 def _resolve_oa_host_sync(auth_code: str, app_key: str, app_secret: str) -> str:
-    """Query the region API to determine the correct OA host for OAuth login."""
     try:
         result = _call_sync(
             REGION_API_PATH,
@@ -388,32 +356,51 @@ def _resolve_oa_host_sync(auth_code: str, app_key: str, app_secret: str) -> str:
         )
         oa_host = result.get("data", {}).get("oaApiGatewayEndpoint", "")
         if oa_host:
-            _LOGGER.info("Region discovery: OA host = %s", oa_host)
             return oa_host
     except Exception as exc:
-        _LOGGER.warning("Region discovery failed: %s — using fallback", exc)
+        _LOGGER.warning("Region discovery failed: %s - using fallback", exc)
     return OA_HOST_FALLBACK
 
 
 # =====================================================================
 #  Step 4: OAuth login -> OA session (sid)
+#
+#  NOTE: The real AigoSmart app includes a full riskControlInfo block
+#  (country, utdid, deviceId, etc.) captured via mitmproxy.  We send
+#  the same zeroed utdid that apk-mitm patches in; the server accepts it.
 # =====================================================================
 
 def _oa_login_sync(
     auth_code: str, oa_host: str, app_key: str, app_secret: str,
-) -> str:
-    """POST loginbyoauth on the OA gateway -> returns sid (OA session ID)."""
+) -> tuple[str, str]:
+    """POST loginbyoauth.json -> returns (sid, refreshToken)."""
     content_type_form = "application/x-www-form-urlencoded; charset=UTF-8"
     accept_json = "application/json; charset=UTF-8"
 
+    # Minimal riskControlInfo (zeroed utdid accepted by server — confirmed via mitmproxy)
+    risk_info = {
+        "appVersion": "201419",
+        "USE_OA_PWD_ENCRYPT": "true",
+        "utdid": "ffffffffffffffffffffffff",
+        "netType": "wifi",
+        "umidToken": "",
+        "locale": "en_US",
+        "appVersionName": "2.15.6",
+        "appAuthToken": "",
+        "appID": "com.aigostar.smart",
+        "signType": "RSA",
+        "sdkVersion": "3.4.2",
+        "USE_H5_NC": "true",
+        "platformName": "android",
+        "brand": "google",
+        "yunOSId": "",
+    }
     oauth_map = {
-        "oauthPlateform": 23,
-        "accessToken": None,
-        "openId": None,
-        "oauthAppKey": app_key,
-        "tokenType": None,
+        "country": "ES",
         "authCode": auth_code,
-        "userData": None,
+        "oauthPlateform": 23,
+        "oauthAppKey": app_key,
+        "riskControlInfo": risk_info,
     }
     form_params = {
         "loginByOauthRequest": json.dumps(oauth_map, separators=(",", ":"), ensure_ascii=False),
@@ -430,7 +417,6 @@ def _oa_login_sync(
     }
     sorted_fp = sorted(form_params.items())
     resource = OA_LOGIN_PATH + "?" + "&".join(f"{k}={v}" for k, v in sorted_fp)
-
     sorted_keys = sorted(sign_headers.keys())
     canonical_hdrs = "\n".join(f"{k}:{sign_headers[k]}" for k in sorted_keys)
     canonical = (
@@ -459,24 +445,23 @@ def _oa_login_sync(
         raw = exc.read()
         raise ValueError(f"OA login failed: HTTP {exc.code}: {raw[:300]}") from exc
 
-    # Extract sid from nested response
     data = result.get("data", {})
     login_data = data.get("data", {}).get("loginSuccessResult", {})
     sid = login_data.get("sid", "")
+    oa_refresh = login_data.get("refreshToken", "")
     if not sid:
         code = data.get("code", "?")
         msg = data.get("message", "")
         raise ValueError(f"OA login failed: code={code}, message={msg}")
     _LOGGER.debug("OA login OK: sid=%s...", sid[:8])
-    return sid
+    return sid, oa_refresh
 
 
 # =====================================================================
-#  Step 5: OA session -> iotToken (via IoT API Gateway)
+#  Step 5: OA session -> iotToken
 # =====================================================================
 
 def _create_session_sync(sid: str, app_key: str, app_secret: str) -> dict:
-    """Exchange OA session ID for iotToken via IoT API Gateway."""
     result = _call_sync(
         PATH_CREATE_SESSION,
         {"request": {"authCode": sid, "appKey": app_key, "accountType": "OA_SESSION"}},
@@ -496,49 +481,41 @@ def full_login_sync(
     email: str, password: str, app_key: str, app_secret: str,
     security_code: str = "",
 ) -> dict:
-    """
-    Full login: email + password -> iotToken.
-    Returns dict with: iotToken, refreshToken, identityId, iotTokenExpire.
-    Raises NeedSecurityCodeError if email verification is required.
-    """
-    # Step 1: UC login
     login_info = _uc_login_sync(email, password, security_code)
     access_token = login_info["access_token"]
     _LOGGER.info("Aigostar login OK (user_id=%s)", login_info.get("user_id", "?"))
 
-    # Step 2: UC authorize -> authCode
     auth_code = _uc_authorize_sync(access_token)
-    _LOGGER.debug("Aigostar authorize OK (code=%s...)", auth_code[:8])
-
-    # Step 3: Region discovery -> OA host
     oa_host = _resolve_oa_host_sync(auth_code, app_key, app_secret)
-
-    # Step 4: OAuth login -> sid (OA session)
-    sid = _oa_login_sync(auth_code, oa_host, app_key, app_secret)
-
-    # Step 5: Create IoT session using sid
+    sid, _oa_refresh = _oa_login_sync(auth_code, oa_host, app_key, app_secret)
     session = _create_session_sync(sid, app_key, app_secret)
-    _LOGGER.info("Aigostar iotToken obtained (expires in %ss)", session.get("iotTokenExpire", "?"))
+    _LOGGER.info(
+        "Aigostar iotToken obtained (expires in %ss)", session.get("iotTokenExpire", "?")
+    )
     return session
 
 
 # =====================================================================
-#  Refresh iotToken
+#  Refresh iotToken  (BUG FIX: upstream uses wrong params format)
 # =====================================================================
 
 def refresh_iot_token_sync(
     refresh_token: str, identity_id: str, app_key: str, app_secret: str,
 ) -> dict:
-    """Renew the iotToken using the refreshToken."""
+    """Renew iotToken using the IoT refreshToken (~8 days lifetime)."""
+    # IMPORTANT: checkOrRefreshSession requires params wrapped in a 'request' key.
+    # The upstream ha-aigostar code is missing this wrapper (returns code 20050).
     result = _call_sync(
         PATH_REFRESH,
-        {"refreshToken": refresh_token, "identityId": identity_id},
+        {"request": {"refreshToken": refresh_token, "identityId": identity_id, "appKey": app_key}},
         app_key, app_secret, iot_token=None, api_ver="1.0.4",
     )
     data = result.get("data", {})
     if "iotToken" not in data:
         raise ValueError(f"Token refresh failed: no iotToken in response: {result}")
-    _LOGGER.info("Aigostar iotToken refreshed (expires in %ss)", data.get("iotTokenExpire", "?"))
+    _LOGGER.info(
+        "Aigostar iotToken refreshed (expires in %ss)", data.get("iotTokenExpire", "?")
+    )
     return data
 
 
@@ -547,7 +524,6 @@ def refresh_iot_token_sync(
 # =====================================================================
 
 def list_devices_sync(app_key: str, app_secret: str, iot_token: str) -> list[dict]:
-    """List all devices bound to the account."""
     result = _call_sync(
         PATH_DEVICES,
         {"pageNo": 1, "pageSize": 100},
@@ -557,8 +533,6 @@ def list_devices_sync(app_key: str, app_secret: str, iot_token: str) -> list[dic
 
 
 class AlibabaIoTClient:
-    """Synchronous client for a single Alibaba Cloud IoT device."""
-
     def __init__(self, iot_id: str, iot_token: str, app_key: str, app_secret: str) -> None:
         self.iot_id = iot_id
         self.iot_token = iot_token
