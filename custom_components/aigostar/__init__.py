@@ -23,6 +23,9 @@ PLATFORMS = ["light"]
 TOKEN_REFRESH_INTERVAL = timedelta(hours=1)
 DEVICE_SYNC_INTERVAL = timedelta(minutes=5)
 
+# Internal key used to persist token creation timestamp across restarts
+_CONF_TOKEN_ISSUED_AT = "token_issued_at"
+
 SERVICE_SYNC = "sync_devices"
 
 
@@ -47,7 +50,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         refresh_token = stored_refresh
         identity_id   = stored_ident
         token_expire  = 72000
-        token_created = time.time()
+        # Restore the real issuance time if we persisted it; otherwise assume now
+        token_created = data.get(_CONF_TOKEN_ISSUED_AT, time.time())
 
         # Quick validation: list devices to confirm the token works
         try:
@@ -70,6 +74,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     identity_id   = new_session.get("identityId", identity_id)
                     token_expire  = int(new_session.get("iotTokenExpire", 72000))
                     token_created = time.time()
+                    # Persist immediately so the refreshed token survives a restart
+                    new_data = {**data}
+                    new_data[CONF_IOT_TOKEN]        = iot_token
+                    new_data[CONF_REFRESH_TOKEN]    = refresh_token
+                    new_data[CONF_IDENTITY_ID]      = identity_id
+                    new_data[_CONF_TOKEN_ISSUED_AT] = token_created
+                    hass.config_entries.async_update_entry(entry, data=new_data)
                     devices = await hass.async_add_executor_job(
                         list_devices_sync, APP_KEY, APP_SECRET, iot_token,
                     )
@@ -155,17 +166,32 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     ed["email"], ed["password"], APP_KEY, APP_SECRET,
                 )
 
-            new_token = new_session["iotToken"]
+            new_token    = new_session["iotToken"]
+            new_refresh  = new_session.get("refreshToken", ed["refresh_token"])
+            new_identity = new_session.get("identityId",   ed["identity_id"])
+            new_expire   = int(new_session.get("iotTokenExpire", 72000))
+            now          = time.time()
+
             ed["iot_token"]     = new_token
-            ed["refresh_token"] = new_session.get("refreshToken", ed["refresh_token"])
-            ed["identity_id"]   = new_session.get("identityId", ed["identity_id"])
-            ed["token_expire"]  = int(new_session.get("iotTokenExpire", 7200))
-            ed["token_created"] = time.time()
+            ed["refresh_token"] = new_refresh
+            ed["identity_id"]   = new_identity
+            ed["token_expire"]  = new_expire
+            ed["token_created"] = now
+
+            # Persist new tokens to config entry so they survive HA restarts
+            new_data = {**entry.data}
+            new_data[CONF_IOT_TOKEN]         = new_token
+            new_data[CONF_REFRESH_TOKEN]     = new_refresh
+            new_data[CONF_IDENTITY_ID]       = new_identity
+            new_data[_CONF_TOKEN_ISSUED_AT]  = now
+            hass.config_entries.async_update_entry(entry, data=new_data)
 
             for entity in hass.data.get(f"{DOMAIN}_entities", {}).get(entry.entry_id, []):
                 entity.update_token(new_token)
 
-            _LOGGER.info("Aigostar: iotToken refreshed successfully")
+            _LOGGER.info(
+                "Aigostar: iotToken refreshed and persisted (expires in %ds)", new_expire
+            )
 
         except Exception as exc:
             _LOGGER.warning(

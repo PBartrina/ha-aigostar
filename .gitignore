@@ -10,3 +10,8 @@ venv/
 .env
 /tools/
 credentials.json
+
+# Aigostar sensitive data — never commit these
+aigostar_tokens.json
+*.tokens.json
+secrets.json
