@@ -172,9 +172,11 @@ class AigostarLight(LightEntity):
         if PROP_COLOR_TEMP in props:
             self._color_temp_k = self._aigo_to_kelvin(int(props[PROP_COLOR_TEMP]))
 
-    def update(self) -> None:
+    async def async_update(self) -> None:
         try:
-            props = self._client.get_properties_sync()
+            props = await self.hass.async_add_executor_job(
+                self._client.get_properties_sync
+            )
             self._apply_props(props)
             self._available = True
         except Exception as exc:
@@ -185,7 +187,7 @@ class AigostarLight(LightEntity):
     # Commands
     # ------------------------------------------------------------------
 
-    def turn_on(self, **kwargs: Any) -> None:
+    async def async_turn_on(self, **kwargs: Any) -> None:
         try:
             items: dict[str, Any] = {PROP_SWITCH: 1}
 
@@ -200,19 +202,27 @@ class AigostarLight(LightEntity):
                 items[PROP_LIGHT_MODE] = 0  # white mode
                 self._color_temp_k = k
 
-            self._client.set_properties_sync(items)
+            await self.hass.async_add_executor_job(
+                self._client.set_properties_sync, items
+            )
             self._is_on     = True
             self._available = True
+            self.async_write_ha_state()
 
         except Exception as exc:
             _LOGGER.error("Aigostar turn_on failed [%s]: %s", self._attr_unique_id, exc)
             self._available = False
+            self.async_write_ha_state()
 
-    def turn_off(self, **kwargs: Any) -> None:
+    async def async_turn_off(self, **kwargs: Any) -> None:
         try:
-            self._client.set_properties_sync({PROP_SWITCH: 0})
+            await self.hass.async_add_executor_job(
+                self._client.set_properties_sync, {PROP_SWITCH: 0}
+            )
             self._is_on     = False
             self._available = True
+            self.async_write_ha_state()
         except Exception as exc:
             _LOGGER.error("Aigostar turn_off failed [%s]: %s", self._attr_unique_id, exc)
             self._available = False
+            self.async_write_ha_state()
