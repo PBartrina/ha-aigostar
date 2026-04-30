@@ -110,6 +110,7 @@ class AigostarLight(LightEntity):
         self._brightness:   int  = 255
         self._color_temp_k: int  = 4000
         self._available:    bool = online
+        self._skip_update:  bool = False
 
     def update_token(self, new_token: str) -> None:
         """Update the iotToken after a refresh."""
@@ -173,6 +174,9 @@ class AigostarLight(LightEntity):
             self._color_temp_k = self._aigo_to_kelvin(int(props[PROP_COLOR_TEMP]))
 
     async def async_update(self) -> None:
+        if self._skip_update:
+            self._skip_update = False
+            return
         try:
             props = await self.hass.async_add_executor_job(
                 self._client.get_properties_sync
@@ -207,6 +211,7 @@ class AigostarLight(LightEntity):
             )
             self._is_on     = True
             self._available = True
+            self._skip_update = True
             self.async_write_ha_state()
 
         except Exception as exc:
@@ -221,6 +226,7 @@ class AigostarLight(LightEntity):
             )
             self._is_on     = False
             self._available = True
+            self._skip_update = True
             self.async_write_ha_state()
         except Exception as exc:
             _LOGGER.error("Aigostar turn_off failed [%s]: %s", self._attr_unique_id, exc)
