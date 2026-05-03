@@ -218,10 +218,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         except Exception as exc:
             _LOGGER.debug("Aigostar auto-sync failed: %s", exc)
 
+    # Immediate refresh callable — used by light entities when they detect a
+    # token-expired error mid-flight (bypasses the elapsed-time guard).
+    async def _force_refresh() -> None:
+        ed = hass.data[DOMAIN].get(entry.entry_id)
+        if not ed:
+            return
+        ed["token_created"] = 0  # Reset so _refresh_token always triggers
+        await _refresh_token()
+
     unsub_refresh = async_track_time_interval(hass, _refresh_token, TOKEN_REFRESH_INTERVAL)
     unsub_sync    = async_track_time_interval(hass, _periodic_sync, DEVICE_SYNC_INTERVAL)
-    entry_data["unsub_refresh"] = unsub_refresh
-    entry_data["unsub_sync"]    = unsub_sync
+    entry_data["unsub_refresh"]  = unsub_refresh
+    entry_data["unsub_sync"]     = unsub_sync
+    entry_data["force_refresh"]  = _force_refresh
 
     # --- SERVICE --------------------------------------------------------
     async def _handle_sync_service(call: ServiceCall) -> None:

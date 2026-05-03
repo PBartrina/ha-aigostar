@@ -10,6 +10,7 @@ Supported TSL properties (TG7100C):
 from __future__ import annotations
 
 import logging
+import time
 from datetime import timedelta
 from typing import Any
 
@@ -24,7 +25,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .alibaba_api import AlibabaIoTClient
+from .alibaba_api import AlibabaIoTClient, TokenExpiredError
 from .const import (
     AIGO_BRIGHT_MAX,
     AIGO_BRIGHT_MIN,
@@ -42,6 +43,10 @@ from .const import (
 _LOGGER = logging.getLogger(__name__)
 
 SCAN_INTERVAL = timedelta(seconds=SCAN_INTERVAL_SECONDS)
+
+# How long (seconds) to suppress polling after a command to avoid API
+# propagation lag reverting the optimistic UI state.
+_POST_COMMAND_SKIP_SECS = 90
 
 
 async def async_setup_entry(
@@ -67,7 +72,14 @@ async def async_setup_entry(
             app_key=app_key,
             app_secret=app_secret,
         )
-        entities.append(AigostarLight(client, iot_id, nick, online=(status == 1), raw_device=dev))
+        entities.append(
+            AigostarLight(
+                client, iot_id, nick,
+                online=(status == 1),
+                raw_device=dev,
+                entry_id=entry.entry_id,
+            )
+        )
 
     # Register entities for token refresh
     hass.data.setdefault(f"{DOMAIN}_entities", {})
@@ -89,10 +101,11 @@ class AigostarLight(LightEntity):
 
     def __init__(
         self, client: AlibabaIoTClient, iot_id: str, name: str,
-        online: bool, raw_device: dict | None = None,
+        online: bool, raw_device: dict | None = None, entry_id: str = "",
     ) -> None:
         self._client = client
         self._attr_unique_id = iot_id
+        self._entry_id = entry_id
 
         raw = raw_device or {}
         product_name = raw.get("productName") or raw.get("categoryName") or "Smart Bulb"
@@ -106,11 +119,11 @@ class AigostarLight(LightEntity):
             sw_version=fw_version,
         )
 
-        self._is_on:        bool = False
-        self._brightness:   int  = 255
-        self._color_temp_k: int  = 4000
-        self._available:    bool = online
-        self._skip_update:  bool = False
+        self._is_on:        bool  = False
+        self._brightness:   int   = 255
+        self._color_temp_k: int   = 4000
+        self._available:    bool  = online
+        self._skip_until:   float = 0.0  # Unix timestamp; skip polls until this time
 
     def update_token(self, new_token: str) -> None:
         """Update the iotToken after a refresh."""
@@ -173,9 +186,19 @@ class AigostarLight(LightEntity):
         if PROP_COLOR_TEMP in props:
             self._color_temp_k = self._aigo_to_kelvin(int(props[PROP_COLOR_TEMP]))
 
+    def _trigger_token_refresh(self) -> None:
+        """Ask the coordinator to refresh the iotToken immediately."""
+        ed = self.hass.data.get(DOMAIN, {}).get(self._entry_id, {})
+        force_refresh = ed.get("force_refresh")
+        if force_refresh:
+            self.hass.async_create_task(force_refresh())
+        else:
+            _LOGGER.debug("Aigostar [%s]: no force_refresh available", self._attr_unique_id)
+
     async def async_update(self) -> None:
-        if self._skip_update:
-            self._skip_update = False
+        # Suppress polls for _post_command_skip_secs after any command to
+        # avoid API propagation lag reverting the optimistic UI state.
+        if time.time() < self._skip_until:
             return
         try:
             props = await self.hass.async_add_executor_job(
@@ -183,6 +206,13 @@ class AigostarLight(LightEntity):
             )
             self._apply_props(props)
             self._available = True
+        except TokenExpiredError as exc:
+            _LOGGER.warning(
+                "Aigostar [%s] token expired during poll, triggering refresh: %s",
+                self._attr_unique_id, exc,
+            )
+            self._available = False
+            self._trigger_token_refresh()
         except Exception as exc:
             _LOGGER.warning("Aigostar [%s] update failed: %s", self._attr_unique_id, exc)
             self._available = False
@@ -211,7 +241,16 @@ class AigostarLight(LightEntity):
             )
             self._is_on     = True
             self._available = True
-            self._skip_update = True
+            self._skip_until = time.time() + _POST_COMMAND_SKIP_SECS
+            self.async_write_ha_state()
+
+        except TokenExpiredError as exc:
+            _LOGGER.warning(
+                "Aigostar [%s] token expired during turn_on, triggering refresh: %s",
+                self._attr_unique_id, exc,
+            )
+            self._available = False
+            self._trigger_token_refresh()
             self.async_write_ha_state()
 
         except Exception as exc:
@@ -226,8 +265,18 @@ class AigostarLight(LightEntity):
             )
             self._is_on     = False
             self._available = True
-            self._skip_update = True
+            self._skip_until = time.time() + _POST_COMMAND_SKIP_SECS
             self.async_write_ha_state()
+
+        except TokenExpiredError as exc:
+            _LOGGER.warning(
+                "Aigostar [%s] token expired during turn_off, triggering refresh: %s",
+                self._attr_unique_id, exc,
+            )
+            self._available = False
+            self._trigger_token_refresh()
+            self.async_write_ha_state()
+
         except Exception as exc:
             _LOGGER.error("Aigostar turn_off failed [%s]: %s", self._attr_unique_id, exc)
             self._available = False

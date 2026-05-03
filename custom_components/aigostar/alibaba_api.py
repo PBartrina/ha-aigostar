@@ -29,6 +29,17 @@ from typing import Any
 
 _LOGGER = logging.getLogger(__name__)
 
+# ---------------------------------------------------------------------------
+# Token-expired detection
+# ---------------------------------------------------------------------------
+# Alibaba Cloud IoT Platform error codes that indicate an invalid/expired token
+_TOKEN_EXPIRED_CODES = frozenset({29005, 20003, 20301, 431})
+_TOKEN_EXPIRED_MSGS  = ("token invalidate", "token expire", "session expire", "authenticate fail")
+
+
+class TokenExpiredError(Exception):
+    """Raised when the Alibaba IoT iotToken is invalid or has expired."""
+
 # --- Alibaba Cloud IoT Gateway ---
 BASE_URL     = "https://eu-central-1.api-iot.aliyuncs.com"
 PATH_GET     = "/thing/properties/get"
@@ -338,6 +349,9 @@ def _call_sync(
 
     code = result.get("code", -1)
     if code != 200:
+        msg = str(result).lower()
+        if code in _TOKEN_EXPIRED_CODES or any(kw in msg for kw in _TOKEN_EXPIRED_MSGS):
+            raise TokenExpiredError(f"iotToken expired/invalid (code={code}): {result}")
         raise ValueError(f"Alibaba IoT error code={code}: {result}")
     return result
 
