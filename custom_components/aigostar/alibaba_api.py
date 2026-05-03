@@ -33,8 +33,8 @@ _LOGGER = logging.getLogger(__name__)
 # Token-expired detection
 # ---------------------------------------------------------------------------
 # Alibaba Cloud IoT Platform error codes that indicate an invalid/expired token
-_TOKEN_EXPIRED_CODES = frozenset({29005, 20003, 20301, 431})
-_TOKEN_EXPIRED_MSGS  = ("token invalidate", "token expire", "session expire", "authenticate fail")
+_TOKEN_EXPIRED_CODES = frozenset({401, 29005, 20003, 20301, 431})
+_TOKEN_EXPIRED_MSGS  = ("token invalidate", "token expire", "session expire", "authenticate fail", "auth error", "request auth")
 
 
 class TokenExpiredError(Exception):
