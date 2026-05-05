@@ -2,7 +2,7 @@
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-41BDF5.svg?style=for-the-badge)](https://github.com/hacs/integration)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](LICENSE)
-[![GitHub Release](https://img.shields.io/github/v/release/MarcoM1993/ha-aigostar?style=for-the-badge)](https://github.com/MarcoM1993/ha-aigostar/releases)
+[![GitHub Release](https://img.shields.io/github/v/release/PBartrina/ha-aigostar?style=for-the-badge)](https://github.com/PBartrina/ha-aigostar/releases)
 A Home Assistant custom integration for **Aigostar smart bulbs** (TG7100C chipset).
 
 Control your Aigostar lights directly from Home Assistant — no local flashing required. The integration communicates with the same backend as the AigoSmart app.
